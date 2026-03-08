@@ -1,17 +1,95 @@
-import os
+import pandas as pd
+import numpy as np
+import networkx as nx
+from haversine import haversine, Unit
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from neo4j import GraphDatabase
-from dotenv import load_dotenv
+import sys
 
-# Load environment variables
-load_dotenv()
-URI = os.getenv("NEO4J_URI")
-USER = os.getenv("NEO4J_USERNAME")
-PASSWORD = os.getenv("NEO4J_PASSWORD")
+# ==========================================
+# 1. Data Processing and Graph Generation
+# ==========================================
 
-app = FastAPI(title="Multimodal Routing API (Neo4j)")
+def load_gtfs_data(data_path='bwgesamt/'):
+    print(f"Loading FULL GTFS data from {data_path}...")
+    try:
+        stops      = pd.read_csv(f'{data_path}stops.txt', dtype=str)
+        stop_times = pd.read_csv(f'{data_path}stop_times.txt', dtype=str) 
+        trips      = pd.read_csv(f'{data_path}trips.txt', dtype=str)
+        routes     = pd.read_csv(f'{data_path}routes.txt', dtype=str)
+        
+        stops['stop_lat'] = pd.to_numeric(stops['stop_lat'])
+        stops['stop_lon'] = pd.to_numeric(stops['stop_lon'])
+        stop_times['stop_sequence'] = pd.to_numeric(stop_times['stop_sequence'])
+
+        stops      = stops[['stop_id', 'stop_name', 'stop_lat', 'stop_lon']]
+        stop_times = stop_times[['trip_id', 'arrival_time', 'departure_time', 'stop_id', 'stop_sequence']]
+        routes     = routes[['route_id', 'route_short_name', 'route_type']]
+        trips      = trips[['trip_id', 'route_id']]
+            
+        print("Data imported successfully.")
+        return stops, stop_times, trips, routes
+    except Exception as e:
+        print(f"Error loading GTFS data: {e}")
+        sys.exit(1)
+
+def calc_distance_km(lat1, lon1, lat2, lon2): 
+    return haversine((lat1, lon1), (lat2, lon2), unit=Unit.KILOMETERS)
+
+def create_transit_graph(stop_times, trips, stops, routes):
+    print("Creating Transit Edges (This may take a minute for the full BW dataset)...")
+    
+    merged = stop_times.merge(trips, on='trip_id').merge(routes, on='route_id')
+    merged = merged.sort_values(['trip_id', 'stop_sequence'])
+    
+    # We only care about topology for edge generation, deduplicate edges!
+    # A lot of buses travel the same path. Group by (stop A -> stop B, route_id) to reduce edges massivey!
+    merged['next_stop_id'] = merged.groupby('trip_id')['stop_id'].shift(-1)
+    edges = merged.dropna(subset=['next_stop_id']).copy()
+    
+    # Deduplicate: we just need one edge per route between A and B
+    edges = edges.drop_duplicates(subset=['stop_id', 'next_stop_id', 'route_short_name', 'route_type'])
+    
+    edges = edges.merge(stops[['stop_id', 'stop_lat', 'stop_lon', 'stop_name']], on='stop_id')
+    edges = edges.merge(
+        stops[['stop_id', 'stop_lat', 'stop_lon', 'stop_name']], 
+        left_on='next_stop_id', 
+        right_on='stop_id', 
+        suffixes=('_start', '_end')
+    )
+    
+    print("Calculating distances...")
+    edges['distance_km'] = edges.apply(
+        lambda x: calc_distance_km(x['stop_lat_start'], x['stop_lon_start'], 
+                                   x['stop_lat_end'], x['stop_lon_end']), axis=1
+    )
+    
+    edges['time_min'] = edges['distance_km'] * 2.5 # approx 2.5 mins per km
+    
+    print("Building NetworkX Graph...")
+    G = nx.MultiDiGraph()
+    for _, row in edges.iterrows():
+        G.add_edge(
+            row['stop_id_start'], 
+            row['stop_id_end'], 
+            trip_id=row['trip_id'],
+            route_short_name=row['route_short_name'],
+            route_type=row['route_type'],
+            distance_km=row['distance_km'],
+            time_min=row['time_min'],
+            start_name=row['stop_name_start'],
+            end_name=row['stop_name_end']
+        )
+        
+    print(f"Graph built with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
+    return G, stops
+
+# ==========================================
+# 2. FastAPI Backend Setup
+# ==========================================
+
+app = FastAPI(title="Multimodal Routing API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,128 +99,110 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-driver = None
+G = None
+STOPS_DF = None
 
 @app.on_event("startup")
 def startup_event():
-    global driver
-    print("Connecting to Neo4j Database...")
-    driver = GraphDatabase.driver(URI, auth=(USER, PASSWORD))
-
-@app.on_event("shutdown")
-def shutdown_event():
-    if driver:
-        driver.close()
+    global G, STOPS_DF
+    stops, stop_times, trips, routes = load_gtfs_data()
+    G, STOPS_DF = create_transit_graph(stop_times, trips, stops, routes)
 
 class RouteRequest(BaseModel):
     start_stop_id: str
     end_stop_id: str
-    time_vs_co2_weight: float = 0.5 # 0.0 = only time, 1.0 = only co2
-    algorithm: str = "dijkstra"
+    time_vs_co2_weight: float = 0.5 
+    algorithm: str = "dijkstra" 
+    co2_config: dict = None
 
 @app.get("/stops")
 def get_stops():
-    with driver.session() as session:
-        # Get all stops that have at least one route connected
-        result = session.run('''
-            MATCH (s:Stop)
-            WHERE EXISTS((s)-[:ROUTES_TO]-())
-            RETURN s.id AS id, s.name AS name
-            ORDER BY s.name
-        ''')
-        return [{"stop_id": record["id"], "stop_name": record["name"]} for record in result]
+    if STOPS_DF is None:
+        return []
+        
+    valid_nodes = set(G.nodes())
+    valid_stops = STOPS_DF[STOPS_DF['stop_id'].isin(valid_nodes)]
+    
+    # DEDUPLICATE STOPS BY NAME:
+    unique_stops = valid_stops.drop_duplicates(subset=['stop_name'])
+    
+    return unique_stops[['stop_id', 'stop_name']].to_dict('records')
 
 @app.post("/route")
 def calculate_route(req: RouteRequest):
-    alpha = 1.0 - req.time_vs_co2_weight
-    beta = req.time_vs_co2_weight
+    if req.start_stop_id not in G or req.end_stop_id not in G:
+        return {"error": "Start- oder Zielhaltestelle im Routing-Netzwerk nicht gefunden."}
+        
+    alpha = 1.0 - req.time_vs_co2_weight 
+    beta = req.time_vs_co2_weight 
     
-    # Da normale Pfadsuche bei 100.000 Edges auf Neo4j ohne Index/GDS abstürzt (hangs),
-    # nutzen wir apoc.algo.dijkstra (APOC Core ist in Aura Free enabled).
-    # Wir müssen vorher sicherstellen, dass wir eine property haben, auf der gesucht wird.
-    # Da wir edge.time und edge.co2 erst im query dynamisch verknüpfen wollen,
-    # machen wir hierfür vorab einen kleinen Trick oder nutzen raw cypher, wenn APOC dynamische Weights nicht mag.
+    # Parse dynamic CO2 mapping
+    co2_map = {
+        '0': 40, '1': 30, '2': 35, '3': 80  # Default fallback
+    }
+    if req.co2_config:
+        co2_map = {
+            '0': req.co2_config.get('tram', 40),
+            '1': req.co2_config.get('subway', 30),
+            '2': req.co2_config.get('rail', 35),
+            '3': req.co2_config.get('bus', 80)
+        }
     
-    # Alternativ: Neo4js Dijkstra über GDS (falls installiert) oder APOC dijkstra mit property name.
-    # Wir machen zur Sicherheit einen harten Cypher Fallback mit kürzester Distanz (APOC dijkstra)
-    # und falls wir keine dynamische Property bauen können, speichern wir the "cost" at query time.
-    
-    # Wir begrenzen das Suchgebiet, in dem wir node Count Limits übergeben, 
-    # aber besser ist es, den Pathfinding Prozess mit apoc.path.expandConfig abzuwickeln
-    # Da wir eine Demo machen wollen, geben wir den weight Wert in der DB fix als query constraint.
-    # Da apoc.algo.dijkstra nur EINE Eigenschaft als Weight akzeptiert, berechnen wir die Kosten 
-    # für Zeit vs CO2 on-the-fly, falls wir das in Neo4j 5 GDS machen. 
-    # Für apoc.algo.dijkstra nehmen wir einfach "time" oder "co2" basierend auf der user präferenz
-    # als vereinfachte Heuristik!
-    
-    # Weight field decision:
-    weight_field = "co2" if beta > 0.6 else "time"
-    
-    query = f'''
-        MATCH (start:Stop {{id: $start_id}})
-        MATCH (end:Stop {{id: $end_id}})
-        CALL apoc.algo.dijkstra(start, end, "ROUTES_TO>", "{weight_field}") YIELD path, weight
-        WITH path
-        WITH nodes(path) as ns, relationships(path) as rels
-        WITH ns, rels,
-             reduce(cost = 0.0, rel in rels | cost + ($alpha * rel.time) + ($beta * (rel.co2 / 10.0))) AS total_cost
-        RETURN 
+    # Dynamic edge weight function
+    def get_dynamic_co2(route_type, distance):
+        g_per_km = co2_map.get(str(route_type), 50)
+        return g_per_km * distance
 
-            [n in ns | n.name] AS stop_names,
-            [r in rels | {{
-                line: r.line, 
-                type: r.type, 
-                time: r.time, 
-                distance: r.distance, 
-                co2: r.co2
-            }}] AS path_edges,
-            total_cost
-    '''
-    
-    with driver.session() as session:
-        try:
-            result = session.run(query, start_id=req.start_stop_id, end_id=req.end_stop_id, alpha=alpha, beta=beta)
-            record = result.single()
+    def edge_weight(u, v, d):
+        # Calculate dynamic CO2 cost on the fly
+        co2_cost = get_dynamic_co2(d['route_type'], d['distance_km'])
+        return alpha * d['time_min'] + beta * (co2_cost / 10.0) 
+        
+    try:
+        path = nx.shortest_path(G, source=req.start_stop_id, target=req.end_stop_id, weight=edge_weight)
+        
+        steps = []
+        total_time = 0.0
+        total_dist = 0.0
+        total_co2 = 0.0
+        
+        for i in range(len(path) - 1):
+            u = path[i]
+            v = path[i+1]
             
-            if not record:
-                return {"error": "Keine Route gefunden oder zu weit entfernt."}
-                
-            stop_names = record["stop_names"]
-            path_edges = record["path_edges"]
+            # Since it's a MultiDiGraph, get the edge with minimum dynamic weight
+            edge_data = G[u][v]
+            best_key = min(edge_data, key=lambda k: edge_weight(u, v, edge_data[k]))
+            e = edge_data[best_key]
             
-            steps = []
-            total_time = 0.0
-            total_dist = 0.0
-            total_co2 = 0.0
+            co2_g = get_dynamic_co2(e['route_type'], e['distance_km'])
             
-            for i, edge in enumerate(path_edges):
-                steps.append({
-                    "from": stop_names[i],
-                    "to": stop_names[i+1],
-                    "line": edge["line"],
-                    "type": edge["type"],
-                    "time": round(edge["time"], 1),
-                    "distance": round(edge["distance"], 2),
-                    "co2": round(edge["co2"], 1)
-                })
-                total_time += edge["time"]
-                total_dist += edge["distance"]
-                total_co2 += edge["co2"]
-                
-            return {
-                "summary": {
-                    "totalTime": round(total_time, 1),
-                    "totalDistance": round(total_dist, 2),
-                    "totalCo2": round(total_co2, 1),
-                    "transfers": max(0, len(steps) - 1)
-                },
-                "steps": steps
-            }
-        except Exception as e:
-            print("Error in Route query:", e)
-            return {"error": "Berechnung dauerte zu lange oder APOC fehlt. Bitte Neo4j Instanz prüfen."}
-
+            steps.append({
+                "from": e['start_name'],
+                "to": e['end_name'],
+                "line": e['route_short_name'],
+                "type": e['route_type'],
+                "time": round(e['time_min'], 1),
+                "distance": round(e['distance_km'], 2),
+                "co2": round(co2_g, 1)
+            })
+            total_time += e['time_min']
+            total_dist += e['distance_km']
+            total_co2 += co2_g
+            
+        return {
+            "summary": {
+                "totalTime": round(total_time, 1),
+                "totalDistance": round(total_dist, 2),
+                "totalCo2": round(total_co2, 1),
+                "transfers": max(0, len(steps) - 1)
+            },
+            "steps": steps
+        }
+            
+    except nx.NetworkXNoPath:
+        return {"error": "Keine Route gefunden."}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -71,22 +71,18 @@
             <div class="route-inputs">
                 <div class="input-field">
                     <label>Von (Haltestelle)</label>
-                    <select v-model="startQuery" class="input-select">
-                        <option value="">Bitte wählen...</option>
-                        <option v-for="stop in allStops" :key="stop.stop_id" :value="stop.stop_id">
-                            {{ stop.stop_name }}
-                        </option>
-                    </select>
+                    <input list="start-stops-list" v-model="startQuery" class="input-select" placeholder="Start eingeben..." />
+                    <datalist id="start-stops-list">
+                        <option v-for="stop in allStops" :key="stop.stop_id" :value="stop.stop_name"></option>
+                    </datalist>
                 </div>
 
                 <div class="input-field">
                     <label>Nach (Haltestelle)</label>
-                    <select v-model="endQuery" class="input-select">
-                        <option value="">Bitte wählen...</option>
-                        <option v-for="stop in allStops" :key="stop.stop_id" :value="stop.stop_id">
-                            {{ stop.stop_name }}
-                        </option>
-                    </select>
+                    <input list="end-stops-list" v-model="endQuery" class="input-select" placeholder="Ziel eingeben..." />
+                    <datalist id="end-stops-list">
+                        <option v-for="stop in allStops" :key="stop.stop_id" :value="stop.stop_name"></option>
+                    </datalist>
                 </div>
             </div>
 
@@ -131,6 +127,70 @@
             </div>
         </div>
     </div>
+
+    <!-- Config Page -->
+    <div class="container" v-if="currentPage === 'config'">
+        <div class="card">
+            <div v-if="configSaved" class="alert alert-success">
+                ✓ Konfiguration erfolgreich gespeichert! (Diese Werte werden nun als Basis-Gewichtungen genutzt)
+            </div>
+
+            <div class="card-title">CO₂-Emissionen pro Verkehrsmittel (g/km)</div>
+            <div class="card-subtitle">Diese Werte werden für die Routenberechnung und CO₂-Bilanz verwendet.</div>
+
+            <div class="info-box">
+                <h3>💡 Hinweis</h3>
+                <ul>
+                    <li>Standard-Werte: Tram=40, U-Bahn=30, Zug=35, Bus=80</li>
+                    <li>Änderungen wirken sich auf den Routing-Algorithmus aus.</li>
+                </ul>
+            </div>
+
+            <div class="config-grid">
+                <div class="config-label">
+                    <strong>Tram / Straßenbahn</strong>
+                </div>
+                <div class="config-input">
+                    <input type="number" v-model.number="co2Config.tram" min="0">
+                    <span style="font-size: 13px; color: #666;">g/km</span>
+                </div>
+            </div>
+
+            <div class="config-grid">
+                <div class="config-label">
+                    <strong>U-Bahn</strong>
+                </div>
+                <div class="config-input">
+                    <input type="number" v-model.number="co2Config.subway" min="0">
+                    <span style="font-size: 13px; color: #666;">g/km</span>
+                </div>
+            </div>
+
+            <div class="config-grid">
+                <div class="config-label">
+                    <strong>Zug / Bahn</strong>
+                </div>
+                <div class="config-input">
+                    <input type="number" v-model.number="co2Config.rail" min="0">
+                    <span style="font-size: 13px; color: #666;">g/km</span>
+                </div>
+            </div>
+
+            <div class="config-grid">
+                <div class="config-label">
+                    <strong>Bus</strong>
+                </div>
+                <div class="config-input">
+                    <input type="number" v-model.number="co2Config.bus" min="0">
+                    <span style="font-size: 13px; color: #666;">g/km</span>
+                </div>
+            </div>
+
+            <button class="btn-primary" @click="saveConfig" style="margin-top: 24px;">
+                <span>💾 Konfiguration speichern</span>
+            </button>
+        </div>
+    </div>
   </div>
 </template>
 
@@ -140,6 +200,19 @@ import { ref, onMounted, computed } from 'vue'
 const currentPage = ref('routing')
 const loading = ref(false)
 const error = ref('')
+const configSaved = ref(false)
+
+const co2Config = ref({
+    tram: 40,
+    subway: 30,
+    rail: 35,
+    bus: 80
+})
+
+const saveConfig = () => {
+    configSaved.value = true
+    setTimeout(() => { configSaved.value = false }, 3000)
+}
 
 // Preferences
 const transportModes = ref([
@@ -192,12 +265,22 @@ const findRoute = async () => {
     error.value = ''
     routeResult.value = null
 
+    const startStop = allStops.value.find(s => s.stop_name === startQuery.value)
+    const endStop = allStops.value.find(s => s.stop_name === endQuery.value)
+    
+    if (!startStop || !endStop) {
+        error.value = "Start oder Ziel nicht gefunden. Bitte aus der Liste wählen."
+        loading.value = false
+        return
+    }
+
     try {
         const payload = {
-            start_stop_id: startQuery.value,
-            end_stop_id: endQuery.value,
+            start_stop_id: startStop.stop_id,
+            end_stop_id: endStop.stop_id,
             time_vs_co2_weight: scoring.value.timeVsCo2 / 100.0,
-            algorithm: 'dijkstra'
+            algorithm: 'dijkstra',
+            co2_config: co2Config.value
         }
         
         const res = await fetch('http://localhost:8000/route', {
@@ -269,4 +352,14 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20p
 .route-details { flex: 1; }
 .route-from-to { font-size: 14px; font-weight: 500; color: #1a1a1a; margin-bottom: 4px; }
 .route-meta { font-size: 12px; color: #999; }
+
+.config-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; padding: 16px 0; border-bottom: 1px solid #f0f0f0; }
+.config-grid:last-child { border-bottom: none; }
+.config-label strong { font-size: 14px; color: #1a1a1a; }
+.config-input { display: flex; align-items: center; gap: 10px; }
+.config-input input { flex: 1; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 6px; font-size: 14px; }
+.info-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
+.info-box h3 { font-size: 14px; font-weight: 600; color: #1565c0; margin-bottom: 8px; }
+.info-box ul { margin-left: 20px; font-size: 13px; color: #555; }
+.alert-success { background: #efe; color: #3a3; border: 1px solid #cfc; }
 </style>
