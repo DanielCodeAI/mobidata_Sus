@@ -61,6 +61,15 @@
                         <span>Hauptsache umwelt</span>
                     </div>
                 </div>
+
+                <div class="slider-group" style="margin-top: 24px;">
+                    <div class="slider-title">Routen-Algorithmus</div>
+                    <div class="slider-description">Wählen Sie das Suchverfahren für die Routenfindung aus.</div>
+                    <select v-model="scoring.algorithm" class="input-select" style="margin-top: 8px;">
+                        <option value="dijkstra">Dijkstra (Garantiert bester Pfad)</option>
+                        <option value="astar">A* / Greedy Search (Heuristik, oft schneller)</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -95,6 +104,25 @@
 
             <div v-if="routeResult" class="route-result">
                 <h3 style="font-size: 16px; margin-bottom: 16px;">📍 Ihre Route</h3>
+                
+                <!-- Map Display -->
+                <div class="map-container" style="height: 300px; width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 24px;">
+                    <l-map ref="map" :zoom="mapZoom" :center="mapCenter" :use-global-leaflet="false">
+                        <l-tile-layer
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            layer-type="base"
+                            name="OpenStreetMap"
+                        ></l-tile-layer>
+
+                        <!-- Route Polyline -->
+                        <l-polyline 
+                            v-if="routeResult.coordinates && routeResult.coordinates.length > 0"
+                            :lat-lngs="routeResult.coordinates" 
+                            color="#4F7FFF" 
+                            :weight="4"
+                        ></l-polyline>
+                    </l-map>
+                </div>
                 
                 <div class="route-summary">
                     <div class="summary-card">
@@ -195,7 +223,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+
+// Leaflet Imports
+import "leaflet/dist/leaflet.css";
+import { LMap, LTileLayer, LPolyline } from "@vue-leaflet/vue-leaflet"
 
 const currentPage = ref('routing')
 const loading = ref(false)
@@ -224,7 +256,8 @@ const preferences = ref({
     walkDistance: 2.5
 })
 const scoring = ref({
-    timeVsCo2: 50
+    timeVsCo2: 50,
+    algorithm: 'dijkstra'
 })
 
 const timeVsCo2Label = computed(() => {
@@ -236,6 +269,10 @@ const allStops = ref([])
 const startQuery = ref('')
 const endQuery = ref('')
 const routeResult = ref(null)
+
+// Map Settings
+const mapCenter = ref([48.7758, 9.1829]) // Default Stuttgart
+const mapZoom = ref(11)
 
 const togglePage = () => {
     currentPage.value = currentPage.value === 'routing' ? 'config' : 'routing'
@@ -279,7 +316,7 @@ const findRoute = async () => {
             start_stop_id: startStop.stop_id,
             end_stop_id: endStop.stop_id,
             time_vs_co2_weight: scoring.value.timeVsCo2 / 100.0,
-            algorithm: 'dijkstra',
+            algorithm: scoring.value.algorithm,
             co2_config: co2Config.value
         }
         
@@ -294,6 +331,13 @@ const findRoute = async () => {
             error.value = data.error
         } else {
             routeResult.value = data
+            
+            // Adjust map view if route coordinates exist
+            if (data.coordinates && data.coordinates.length > 0) {
+                // Focus the map on the first point temporarily
+                mapCenter.value = data.coordinates[0]
+                mapZoom.value = 13
+            }
         }
     } catch (err) {
         error.value = "Server Fehler bei der Routenberechnung."

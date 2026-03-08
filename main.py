@@ -154,14 +154,38 @@ def calculate_route(req: RouteRequest):
         return g_per_km * distance
 
     def edge_weight(u, v, d):
-        # Calculate dynamic CO2 cost on the fly
-        co2_cost = get_dynamic_co2(d['route_type'], d['distance_km'])
-        return alpha * d['time_min'] + beta * (co2_cost / 10.0) 
+        # In a MultiDiGraph, d is a dictionary of dictionaries (keys are 0, 1, 2...)
+        # We need to find the edge with the minimum cost between u and v
+        min_cost = float('inf')
+        for key, edge_data in d.items():
+            co2_cost = get_dynamic_co2(edge_data['route_type'], edge_data['distance_km'])
+            cost = alpha * edge_data['time_min'] + beta * (co2_cost / 10.0)
+            if cost < min_cost:
+                min_cost = cost
+        return min_cost
+        
+    def astar_heuristic(u, v):
+        # Haversine distance from current node `u` to target node `v`
+        try:
+            u_data = STOPS_DF[STOPS_DF['stop_id'] == u].iloc[0]
+            v_data = STOPS_DF[STOPS_DF['stop_id'] == v].iloc[0]
+            dist = calc_distance_km(u_data['stop_lat'], u_data['stop_lon'], v_data['stop_lat'], v_data['stop_lon'])
+            
+            # Estimate best-case scenario (e.g. fastest possible transport like a train with 40g CO2, and 1 min/km)
+            # This is an admissible heuristic for the weighted cost function
+            best_time = dist * 1.0  # Assumed 60km/h
+            best_co2 = dist * 30.0  # Subway equivalent
+            return alpha * best_time + beta * (best_co2 / 10.0)
+        except:
+            return 0
         
     try:
-        path = nx.shortest_path(G, source=req.start_stop_id, target=req.end_stop_id, weight=edge_weight)
+        if req.algorithm.lower() == 'greedy' or req.algorithm.lower() == 'astar':
+            path = nx.astar_path(G, source=req.start_stop_id, target=req.end_stop_id, heuristic=astar_heuristic, weight=edge_weight)
+        else:
+            path = nx.shortest_path(G, source=req.start_stop_id, target=req.end_stop_id, weight=edge_weight)
         
-        steps = []
+        raw_steps = []
         total_time = 0.0
         total_dist = 0.0
         total_co2 = 0.0
@@ -172,32 +196,83 @@ def calculate_route(req: RouteRequest):
             
             # Since it's a MultiDiGraph, get the edge with minimum dynamic weight
             edge_data = G[u][v]
-            best_key = min(edge_data, key=lambda k: edge_weight(u, v, edge_data[k]))
+            
+            # The edge_data is a dict like: {0: {'route_type': '3', ...}, 1: {'route_type': '2', ...}}
+            # To find the best key, we have to evaluate our `edge_weight(u, v, internal_d)` 
+            # Notice that `edge_weight` expects `d` to be the FULL dictionary of dictionaries `{0: {...}}`
+            # This is because `nx.shortest_path` passes the full `d` to `weight`.
+            # To find the best edge for our manual step extraction, we just iterate the same way:
+            best_key = None
+            min_cost = float('inf')
+            for k, data in edge_data.items():
+                cost = get_dynamic_co2(data['route_type'], data['distance_km']) * (beta / 10.0) + alpha * data['time_min']
+                if cost < min_cost:
+                    min_cost = cost
+                    best_key = k
+                    
             e = edge_data[best_key]
             
             co2_g = get_dynamic_co2(e['route_type'], e['distance_km'])
             
-            steps.append({
+            raw_steps.append({
                 "from": e['start_name'],
                 "to": e['end_name'],
+                "from_lat": STOPS_DF[STOPS_DF['stop_id'] == u].iloc[0]['stop_lat'],
+                "from_lon": STOPS_DF[STOPS_DF['stop_id'] == u].iloc[0]['stop_lon'],
+                "to_lat": STOPS_DF[STOPS_DF['stop_id'] == v].iloc[0]['stop_lat'],
+                "to_lon": STOPS_DF[STOPS_DF['stop_id'] == v].iloc[0]['stop_lon'],
                 "line": e['route_short_name'],
                 "type": e['route_type'],
-                "time": round(e['time_min'], 1),
-                "distance": round(e['distance_km'], 2),
-                "co2": round(co2_g, 1)
+                "time": e['time_min'],
+                "distance": e['distance_km'],
+                "co2": co2_g
             })
             total_time += e['time_min']
             total_dist += e['distance_km']
             total_co2 += co2_g
+            
+        # Deduplication Logic: Group continuous segments of the same line
+        grouped_steps = []
+        path_coordinates = [] # List of [lat, lon] tuples for drawing a polyline
+        
+        if raw_steps:
+            current_step = dict(raw_steps[0])
+            path_coordinates.append([current_step['from_lat'], current_step['from_lon']])
+            
+            for i in range(1, len(raw_steps)):
+                next_step = raw_steps[i]
+                path_coordinates.append([next_step['from_lat'], next_step['from_lon']])
+                
+                if current_step['line'] == next_step['line'] and current_step['type'] == next_step['type']:
+                    # Extend current step
+                    current_step['to'] = next_step['to']
+                    current_step['time'] += next_step['time']
+                    current_step['distance'] += next_step['distance']
+                    current_step['co2'] += next_step['co2']
+                else:
+                    # Round specific step data before saving
+                    current_step['time'] = round(current_step['time'], 1)
+                    current_step['distance'] = round(current_step['distance'], 2)
+                    current_step['co2'] = round(current_step['co2'], 1)
+                    grouped_steps.append(current_step)
+                    current_step = dict(next_step)
+            
+            # Add the last step coordinates and data
+            path_coordinates.append([current_step['to_lat'], current_step['to_lon']])
+            current_step['time'] = round(current_step['time'], 1)
+            current_step['distance'] = round(current_step['distance'], 2)
+            current_step['co2'] = round(current_step['co2'], 1)
+            grouped_steps.append(current_step)
             
         return {
             "summary": {
                 "totalTime": round(total_time, 1),
                 "totalDistance": round(total_dist, 2),
                 "totalCo2": round(total_co2, 1),
-                "transfers": max(0, len(steps) - 1)
+                "transfers": max(0, len(grouped_steps) - 1)
             },
-            "steps": steps
+            "steps": grouped_steps,
+            "coordinates": path_coordinates
         }
             
     except nx.NetworkXNoPath:
