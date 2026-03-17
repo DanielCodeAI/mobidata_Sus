@@ -1,0 +1,24 @@
+# GTFS raw data (3.6 GB — zu gross fuer Git)
+data/bwgesamt/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# Results (generiert)
+results/*.json
+results/*.csv

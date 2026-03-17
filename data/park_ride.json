@@ -1,0 +1,110 @@
+[
+  {
+    "id": "fb-pr-hbf",
+    "name": "P+R Freiburg Hbf (Süd)",
+    "lat": 47.9958,
+    "lon": 7.8421,
+    "capacity": 220,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-pr-padua",
+    "name": "P+R Freiburg Paduaallee",
+    "lat": 48.0234,
+    "lon": 7.8312,
+    "capacity": 180,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-pr-munzinger",
+    "name": "P+R Freiburg-Munzinger Str.",
+    "lat": 47.9712,
+    "lon": 7.8198,
+    "capacity": 95,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "loe-pr-hbf",
+    "name": "P+R Lörrach Hbf",
+    "lat": 47.6128,
+    "lon": 7.6608,
+    "capacity": 120,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "loe-pr-stetten",
+    "name": "P+R Lörrach-Stetten",
+    "lat": 47.6201,
+    "lon": 7.6453,
+    "capacity": 60,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "war-pr-bf",
+    "name": "P+R Weil am Rhein Bf",
+    "lat": 47.5942,
+    "lon": 7.6138,
+    "capacity": 85,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "bk-pr-bf",
+    "name": "P+R Bad Krozingen Bf",
+    "lat": 47.9186,
+    "lon": 7.7033,
+    "capacity": 110,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "mh-pr-bf",
+    "name": "P+R Müllheim Bf",
+    "lat": 47.8095,
+    "lon": 7.6281,
+    "capacity": 75,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "em-pr-bf",
+    "name": "P+R Emmendingen Bf",
+    "lat": 48.1204,
+    "lon": 7.8507,
+    "capacity": 90,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-pr-littenweiler",
+    "name": "P+R Freiburg-Littenweiler",
+    "lat": 47.9813,
+    "lon": 7.8812,
+    "capacity": 50,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "dz-pr-bf",
+    "name": "P+R Denzlingen Bf",
+    "lat": 48.0688,
+    "lon": 7.8764,
+    "capacity": 65,
+    "purpose": "CAR",
+    "has_realtime": false
+  },
+  {
+    "id": "gt-pr-bf",
+    "name": "P+R Gundelfingen Bf",
+    "lat": 48.0431,
+    "lon": 7.8654,
+    "capacity": 40,
+    "purpose": "CAR",
+    "has_realtime": false
+  }
+]

@@ -1,0 +1,122 @@
+[
+  {
+    "id": "fb-br-hbf",
+    "name": "B+R Freiburg Hbf",
+    "lat": 47.9972,
+    "lon": 7.8413,
+    "capacity": 1200,
+    "purpose": "BIKE",
+    "type": "Fahrradparkhaus",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-br-bertoldsbr",
+    "name": "B+R Bertoldsbrunnen",
+    "lat": 47.9942,
+    "lon": 7.8491,
+    "capacity": 80,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-br-stadttheater",
+    "name": "B+R Stadttheater",
+    "lat": 47.9933,
+    "lon": 7.8463,
+    "capacity": 60,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "loe-br-hbf",
+    "name": "B+R Lörrach Hbf",
+    "lat": 47.6131,
+    "lon": 7.6612,
+    "capacity": 150,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "loe-br-museum",
+    "name": "B+R Lörrach Museum/Bf",
+    "lat": 47.6152,
+    "lon": 7.6587,
+    "capacity": 40,
+    "purpose": "BIKE",
+    "type": "Box",
+    "has_realtime": false
+  },
+  {
+    "id": "war-br-bf",
+    "name": "B+R Weil am Rhein Bf",
+    "lat": 47.5945,
+    "lon": 7.6142,
+    "capacity": 80,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "bk-br-bf",
+    "name": "B+R Bad Krozingen Bf",
+    "lat": 47.9189,
+    "lon": 7.7037,
+    "capacity": 120,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "mh-br-bf",
+    "name": "B+R Müllheim Bf",
+    "lat": 47.8098,
+    "lon": 7.6285,
+    "capacity": 90,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "em-br-bf",
+    "name": "B+R Emmendingen Bf",
+    "lat": 48.1207,
+    "lon": 7.8511,
+    "capacity": 100,
+    "purpose": "BIKE",
+    "type": "Box",
+    "has_realtime": false
+  },
+  {
+    "id": "fb-br-littenweiler",
+    "name": "B+R FR-Littenweiler",
+    "lat": 47.9816,
+    "lon": 7.8815,
+    "capacity": 45,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "dz-br-bf",
+    "name": "B+R Denzlingen Bf",
+    "lat": 48.0691,
+    "lon": 7.8768,
+    "capacity": 70,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  },
+  {
+    "id": "gt-br-bf",
+    "name": "B+R Gundelfingen Bf",
+    "lat": 48.0434,
+    "lon": 7.8658,
+    "capacity": 55,
+    "purpose": "BIKE",
+    "type": "Bügel",
+    "has_realtime": false
+  }
+]

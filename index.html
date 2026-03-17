@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MobiData Pendler-Routing — BW</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       display: flex; height: 100vh; background: #f5f5f5; color: #222; }
+
+/* ─── Sidebar ───────────────────────────────────────────── */
+#sidebar { width: 420px; overflow-y: auto; background: #fff;
+           box-shadow: 2px 0 8px rgba(0,0,0,.1); z-index: 1000;
+           display: flex; flex-direction: column; }
+#sidebar h1 { font-size: 1.1em; padding: 16px; background: #1a73e8;
+              color: #fff; letter-spacing: .5px; }
+.input-group { padding: 12px 16px; border-bottom: 1px solid #eee;
+               position: relative; }
+.input-group label { display: block; font-size: .8em; color: #666;
+                     margin-bottom: 4px; font-weight: 600; }
+.input-group input, .input-group select { width: 100%; padding: 8px 10px;
+                     border: 1px solid #ddd; border-radius: 4px; font-size: .9em;
+                     background: #fff; }
+.input-group input:focus, .input-group select:focus { outline: none; border-color: #1a73e8; }
+.addr-input { padding-right: 36px !important; }
+#btn-route { width: calc(100% - 32px); margin: 12px 16px; padding: 12px;
+             background: #1a73e8; color: #fff; border: none; border-radius: 6px;
+             font-size: 1em; cursor: pointer; font-weight: 600; }
+#btn-route:hover { background: #1557b0; }
+#btn-route:disabled { background: #aaa; cursor: not-allowed; }
+
+/* ─── GPS Button ───────────────────────────────────────── */
+.gps-btn { position: absolute; right: 24px; top: 28px; background: none;
+           border: none; cursor: pointer; font-size: 1.1em; color: #888;
+           padding: 4px; border-radius: 4px; line-height: 1; }
+.gps-btn:hover { color: #1a73e8; background: #e8f0fe; }
+.gps-btn.active { color: #1a73e8; }
+
+/* ─── Autocomplete ─────────────────────────────────────── */
+.ac-list { position: absolute; left: 16px; right: 16px; top: 100%;
+           background: #fff; border: 1px solid #ddd; border-top: none;
+           border-radius: 0 0 6px 6px; max-height: 200px; overflow-y: auto;
+           z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+           display: none; }
+.ac-list.show { display: block; }
+.ac-item { padding: 8px 12px; cursor: pointer; font-size: .85em;
+           border-bottom: 1px solid #f5f5f5; }
+.ac-item:hover, .ac-item.selected { background: #e8f0fe; }
+.ac-item small { color: #888; display: block; font-size: .8em; }
+
+/* ─── Results ───────────────────────────────────────────── */
+#results { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+.result-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+               margin-top: 12px; overflow: hidden; }
+.result-card.active { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,.2); }
+.card-header { padding: 12px 16px; display: flex; justify-content: space-between;
+               align-items: center; cursor: pointer; }
+.card-header h3 { font-size: .95em; }
+.card-body { padding: 0 16px 12px; font-size: .85em; }
+.metric { display: flex; justify-content: space-between; padding: 4px 0;
+          border-bottom: 1px solid #f0f0f0; }
+.metric:last-child { border: none; }
+.metric-val { font-weight: 600; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+         font-size: .75em; font-weight: 600; color: #fff; }
+.badge-car { background: #e53935; }
+.badge-pr { background: #43a047; }
+.badge-at { background: #ff9800; }
+.badge-br { background: #1e88e5; }
+
+/* ─── Score gauge ───────────────────────────────────────── */
+.score-gauge { text-align: center; margin: 8px 0; }
+.score-circle { width: 64px; height: 64px; border-radius: 50%;
+                display: inline-flex; align-items: center; justify-content: center;
+                font-size: 1.2em; font-weight: 700; color: #fff; }
+
+/* ─── CO2 bar chart ─────────────────────────────────────── */
+.co2-chart { margin: 12px 0; }
+.co2-bar-row { display: flex; align-items: center; margin: 4px 0; font-size: .8em; }
+.co2-bar-label { width: 50px; text-align: right; margin-right: 8px; }
+.co2-bar-track { flex: 1; height: 18px; background: #eee; border-radius: 3px; overflow: hidden; }
+.co2-bar-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.co2-bar-val { width: 60px; text-align: right; margin-left: 8px; font-weight: 600; }
+
+/* ─── Sliders ───────────────────────────────────────────── */
+.slider-group { padding: 8px 16px; }
+.slider-group label { font-size: .8em; color: #666; display: flex;
+                      justify-content: space-between; }
+.slider-group input[type=range] { width: 100%; margin: 4px 0;
+                                   accent-color: #1a73e8; }
+
+/* ─── Section headers ──────────────────────────────────── */
+.section-label { padding: 12px 16px 4px; font-size: .75em; font-weight: 700;
+                 color: #999; text-transform: uppercase; letter-spacing: .5px; }
+
+/* ─── Advanced toggle ──────────────────────────────────── */
+.advanced-toggle { padding: 4px 16px 8px; font-size: .8em; color: #1a73e8;
+                   cursor: pointer; text-decoration: underline; }
+
+/* ─── Algorithm table ───────────────────────────────────── */
+.algo-toggle { font-size: .8em; color: #1a73e8; cursor: pointer;
+               padding: 8px 0; text-decoration: underline; }
+.algo-table { width: 100%; border-collapse: collapse; font-size: .8em; margin: 8px 0; }
+.algo-table th, .algo-table td { padding: 4px 8px; text-align: right;
+                                  border-bottom: 1px solid #eee; }
+.algo-table th { text-align: left; font-weight: 600; background: #f8f8f8; }
+.algo-table td:first-child { text-align: left; }
+
+/* ─── Notice box ────────────────────────────────────────── */
+.notice { background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px;
+          padding: 12px; margin-top: 12px; font-size: .85em; }
+.notice.error { background: #ffebee; border-color: #e53935; }
+
+/* ─── Loading ───────────────────────────────────────────── */
+.spinner { display: inline-block; width: 20px; height: 20px;
+           border: 3px solid #ddd; border-top-color: #1a73e8;
+           border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Map ───────────────────────────────────────────────── */
+#map { flex: 1; }
+
+/* ─── Responsive ────────────────────────────────────────── */
+@media (max-width: 800px) {
+  body { flex-direction: column; }
+  #sidebar { width: 100%; max-height: 50vh; }
+  #map { height: 50vh; }
+}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>MobiData Pendler-Routing</h1>
+
+  <!-- Startadresse mit Autocomplete + GPS -->
+  <div class="input-group">
+    <label>Startadresse (Wohnort)</label>
+    <input id="start-addr" class="addr-input" type="text"
+           placeholder="Adresse, Haltestelle oder Ort eingeben..." autocomplete="off">
+    <button class="gps-btn" id="gps-start" title="Mein Standort verwenden">&#9678;</button>
+    <div class="ac-list" id="ac-start"></div>
+  </div>
+
+  <!-- Zieladresse mit Autocomplete -->
+  <div class="input-group">
+    <label>Zieladresse (Arbeitsplatz)</label>
+    <input id="end-addr" class="addr-input" type="text"
+           placeholder="Adresse, Haltestelle oder Ort eingeben..." autocomplete="off">
+    <button class="gps-btn" id="gps-end" title="Mein Standort verwenden">&#9678;</button>
+    <div class="ac-list" id="ac-end"></div>
+  </div>
+
+  <!-- Ankunftszeit -->
+  <div class="input-group">
+    <label>Gewünschte Ankunftszeit</label>
+    <input id="arrival-time" type="time" value="08:30">
+  </div>
+
+  <!-- Algorithmus-Auswahl -->
+  <div class="input-group">
+    <label>Routing-Algorithmus</label>
+    <select id="algorithm">
+      <option value="astar" selected>A* (Standard — schnell &amp; optimal)</option>
+      <option value="dijkstra">Dijkstra (Referenz — exakt optimal)</option>
+      <option value="greedy">Greedy (schnell — keine Optimierung)</option>
+    </select>
+  </div>
+
+  <!-- Komfort-Profil -->
+  <div class="section-label">Meine Praferenzen</div>
+  <div class="input-group">
+    <label>Komfort-Profil</label>
+    <select id="profile">
+      <option value="balanced">Ausgewogen</option>
+      <option value="eco">Umweltbewusst (CO2 priorisiert)</option>
+      <option value="fast">Zeitoptimiert (schnellste Route)</option>
+      <option value="cheap">Sparfuchs (guenstigste Route)</option>
+      <option value="custom">Benutzerdefiniert...</option>
+    </select>
+  </div>
+
+  <!-- Max. Fahrraddistanz -->
+  <div class="slider-group">
+    <label>Max. Fahrradstrecke <span id="max-bike-val">5 km</span></label>
+    <input type="range" id="max-bike" min="0" max="15" value="5" step="1">
+  </div>
+
+  <!-- Max. Fussweg -->
+  <div class="slider-group">
+    <label>Max. Fussweg <span id="max-walk-val">800 m</span></label>
+    <input type="range" id="max-walk" min="100" max="2000" value="800" step="100">
+  </div>
+
+  <!-- Erweiterte Gewichtungen (collapsed) -->
+  <div class="advanced-toggle" id="advanced-toggle">Erweiterte Gewichtungen anzeigen</div>
+  <div id="advanced-weights" style="display:none">
+    <div class="slider-group">
+      <label>CO2-Gewichtung <span id="w-co2-val">40%</span></label>
+      <input type="range" id="w-co2" min="0" max="100" value="40">
+    </div>
+    <div class="slider-group">
+      <label>Zeit-Gewichtung <span id="w-time-val">35%</span></label>
+      <input type="range" id="w-time" min="0" max="100" value="35">
+    </div>
+    <div class="slider-group">
+      <label>Kosten-Gewichtung <span id="w-cost-val">25%</span></label>
+      <input type="range" id="w-cost" min="0" max="100" value="25">
+    </div>
+  </div>
+
+  <button id="btn-route">Route berechnen</button>
+
+  <div id="results"></div>
+</div>
+
+<div id="map"></div>
+
+<script>
+// ─── Map Setup ─────────────────────────────────────────────
+const map = L.map('map').setView([47.9, 7.8], 10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 18,
+}).addTo(map);
+
+const routeLayers = L.layerGroup().addTo(map);
+const markerLayers = L.layerGroup().addTo(map);
+const stationLayers = L.layerGroup().addTo(map);
+
+let lastRouteData = null;
+
+// ─── Coordinate Storage ────────────────────────────────────
+const startCoords = { lat: null, lon: null };
+const endCoords = { lat: null, lon: null };
+
+// ─── Autocomplete with Nominatim ───────────────────────────
+let acTimeout = null;
+let lastNominatimCall = 0;
+const NOMINATIM_MIN_INTERVAL = 1100; // respect 1 req/sec policy
+
+async function nominatimSearch(query, listEl, coordStore) {
+  if (query.length < 3) { listEl.classList.remove('show'); return; }
+
+  // Rate-limit
+  const now = Date.now();
+  const wait = NOMINATIM_MIN_INTERVAL - (now - lastNominatimCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  lastNominatimCall = Date.now();
+
+  try {
+    const params = new URLSearchParams({
+      q: query, format: 'json', limit: '6',
+      countrycodes: 'de,ch',
+      viewbox: '7.4,47.4,8.2,48.4', bounded: '0',
+    });
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params}`,
+      { headers: { 'User-Agent': 'MobiData-Pendler-MVP/1.0' } }
+    );
+    const data = await resp.json();
+
+    listEl.innerHTML = '';
+    if (data.length === 0) {
+      listEl.innerHTML = '<div class="ac-item" style="color:#888">Keine Ergebnisse</div>';
+      listEl.classList.add('show');
+      return;
+    }
+
+    data.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'ac-item';
+      div.innerHTML = `${item.display_name.split(',').slice(0, 3).join(', ')}
+        <small>${item.type || ''} &middot; ${(+item.lat).toFixed(4)}, ${(+item.lon).toFixed(4)}</small>`;
+      div.addEventListener('click', () => {
+        coordStore.lat = +item.lat;
+        coordStore.lon = +item.lon;
+        // Find the input above this list
+        const input = listEl.parentElement.querySelector('input[type=text]');
+        input.value = item.display_name.split(',').slice(0, 3).join(', ');
+        listEl.classList.remove('show');
+      });
+      listEl.appendChild(div);
+    });
+    listEl.classList.add('show');
+  } catch (e) {
+    console.warn('Nominatim error:', e);
+  }
+}
+
+function setupAutocomplete(inputId, listId, coordStore) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+
+  input.addEventListener('input', () => {
+    coordStore.lat = null;
+    coordStore.lon = null;
+    clearTimeout(acTimeout);
+    acTimeout = setTimeout(() => nominatimSearch(input.value, list, coordStore), 350);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    const items = list.querySelectorAll('.ac-item');
+    const sel = list.querySelector('.ac-item.selected');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!sel && items.length) items[0].classList.add('selected');
+      else if (sel && sel.nextElementSibling) {
+        sel.classList.remove('selected');
+        sel.nextElementSibling.classList.add('selected');
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (sel && sel.previousElementSibling) {
+        sel.classList.remove('selected');
+        sel.previousElementSibling.classList.add('selected');
+      }
+    } else if (e.key === 'Enter') {
+      if (sel) { e.preventDefault(); sel.click(); }
+    } else if (e.key === 'Escape') {
+      list.classList.remove('show');
+    }
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !list.contains(e.target)) {
+      list.classList.remove('show');
+    }
+  });
+}
+
+setupAutocomplete('start-addr', 'ac-start', startCoords);
+setupAutocomplete('end-addr', 'ac-end', endCoords);
+
+// ─── GPS Buttons ────────────────────────────────────────────
+function setupGPS(btnId, inputId, coordStore) {
+  document.getElementById(btnId).addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation ist in diesem Browser nicht verfuegbar.');
+      return;
+    }
+    const btn = document.getElementById(btnId);
+    btn.textContent = '...';
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        coordStore.lat = pos.coords.latitude;
+        coordStore.lon = pos.coords.longitude;
+        const input = document.getElementById(inputId);
+        btn.textContent = '\u25CE';
+        btn.classList.add('active');
+        // Reverse geocode for nice name
+        try {
+          const resp = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json`,
+            { headers: { 'User-Agent': 'MobiData-Pendler-MVP/1.0' } }
+          );
+          const data = await resp.json();
+          if (data.display_name) {
+            input.value = data.display_name.split(',').slice(0, 3).join(', ');
+          } else {
+            input.value = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+          }
+        } catch (e) {
+          input.value = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+        }
+      },
+      (err) => {
+        btn.textContent = '\u25CE';
+        alert('Standort konnte nicht ermittelt werden. Bitte Standortzugriff erlauben.');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
+
+setupGPS('gps-start', 'start-addr', startCoords);
+setupGPS('gps-end', 'end-addr', endCoords);
+
+// ─── Load parking stations on map ──────────────────────────
+async function loadStations() {
+  try {
+    const resp = await fetch('/parking');
+    const data = await resp.json();
+
+    (data.park_ride || []).forEach(s => {
+      const color = s.has_realtime
+        ? (s.available > 0 ? '#43a047' : '#e53935')
+        : '#9e9e9e';
+      L.circleMarker([s.lat, s.lon], {
+        radius: 6, color, fillColor: color, fillOpacity: 0.7, weight: 1,
+      }).bindPopup(`<b>P+R: ${s.name}</b><br>Kapazitaet: ${s.capacity}` +
+        (s.available != null ? `<br>Frei: ${s.available}` : '') +
+        (s.has_realtime ? '<br><i>Echtzeit</i>' : '')).addTo(stationLayers);
+    });
+
+    (data.bike_ride || []).forEach(s => {
+      L.circleMarker([s.lat, s.lon], {
+        radius: 5, color: '#1e88e5', fillColor: '#1e88e5', fillOpacity: 0.6, weight: 1,
+      }).bindPopup(`<b>B+R: ${s.name}</b><br>Typ: ${s.type || '-'}<br>Kapazitaet: ${s.capacity}`)
+        .addTo(stationLayers);
+    });
+  } catch (e) {
+    console.warn('Could not load stations:', e);
+  }
+}
+loadStations();
+
+// ─── Comfort Profile Logic ─────────────────────────────────
+const PROFILES = {
+  balanced: { co2: 40, time: 35, cost: 25 },
+  eco:      { co2: 60, time: 20, cost: 20 },
+  fast:     { co2: 20, time: 60, cost: 20 },
+  cheap:    { co2: 20, time: 20, cost: 60 },
+};
+
+const profileSelect = document.getElementById('profile');
+const wCo2 = document.getElementById('w-co2');
+const wTime = document.getElementById('w-time');
+const wCost = document.getElementById('w-cost');
+const advancedDiv = document.getElementById('advanced-weights');
+const advancedToggle = document.getElementById('advanced-toggle');
+
+profileSelect.addEventListener('change', () => {
+  const val = profileSelect.value;
+  if (val === 'custom') {
+    advancedDiv.style.display = '';
+    advancedToggle.style.display = 'none';
+  } else {
+    const p = PROFILES[val];
+    wCo2.value = p.co2; wTime.value = p.time; wCost.value = p.cost;
+    updateSliderLabels();
+    if (lastRouteData) recalcScores();
+  }
+});
+
+advancedToggle.addEventListener('click', () => {
+  advancedDiv.style.display = advancedDiv.style.display === 'none' ? '' : 'none';
+  advancedToggle.textContent = advancedDiv.style.display === 'none'
+    ? 'Erweiterte Gewichtungen anzeigen'
+    : 'Erweiterte Gewichtungen ausblenden';
+});
+
+// ─── Slider Logic ──────────────────────────────────────────
+function updateSliderLabels() {
+  document.getElementById('w-co2-val').textContent = wCo2.value + '%';
+  document.getElementById('w-time-val').textContent = wTime.value + '%';
+  document.getElementById('w-cost-val').textContent = wCost.value + '%';
+}
+wCo2.oninput = wTime.oninput = wCost.oninput = () => {
+  profileSelect.value = 'custom';
+  updateSliderLabels();
+  if (lastRouteData) recalcScores();
+};
+
+// Distance sliders
+const maxBike = document.getElementById('max-bike');
+const maxWalk = document.getElementById('max-walk');
+maxBike.oninput = () => {
+  document.getElementById('max-bike-val').textContent = maxBike.value + ' km';
+};
+maxWalk.oninput = () => {
+  document.getElementById('max-walk-val').textContent = maxWalk.value + ' m';
+};
+
+// ─── Score Recalculation (client-side) ─────────────────────
+function calcScore(co2Car, co2Alt, timeCar, timeAlt, costCar, costAlt) {
+  const wc = +wCo2.value, wt = +wTime.value, wk = +wCost.value;
+  const ws = wc + wt + wk || 1;
+
+  const co2Score = co2Car > 0 ? Math.max(0, Math.min(100, (co2Car - co2Alt) / co2Car * 100)) : 50;
+  const timeRatio = timeCar > 0 ? timeAlt / timeCar : 1;
+  const timeScore = Math.max(0, Math.min(100, (2 - timeRatio) / 2 * 100));
+  const costScore = costCar > 0 ? Math.max(0, Math.min(100, (costCar - costAlt) / costCar * 100)) : 50;
+
+  return Math.round(Math.max(0, Math.min(100, (wc * co2Score + wt * timeScore + wk * costScore) / ws)) * 10) / 10;
+}
+
+function recalcScores() {
+  if (!lastRouteData) return;
+  const d = lastRouteData;
+  const car = d.car_only;
+  if (d.park_and_ride) {
+    const pr = d.park_and_ride;
+    pr.score = calcScore(car.co2_g, pr.co2_g, car.duration_min, pr.total_duration_min, car.cost_eur, pr.cost_eur);
+  }
+  if (d.auto_transit) {
+    const at = d.auto_transit;
+    at.score = calcScore(car.co2_g, at.co2_g, car.duration_min, at.total_duration_min, car.cost_eur, at.cost_eur);
+  }
+  if (d.bike_and_ride) {
+    const br = d.bike_and_ride;
+    br.score = calcScore(car.co2_g, br.co2_g, car.duration_min, br.total_duration_min, car.cost_eur, br.cost_eur);
+  }
+  renderResults(d);
+}
+
+// ─── CO2 Equivalents ───────────────────────────────────────
+// Quellen: UBA, ifeu-Institut, diverse Verbraucherzentralen
+function co2Equivalents(grams) {
+  const kg = grams / 1000;
+  const equivs = [];
+  // Waschmaschine 60°C: ~600g CO2 pro Zyklus (Strommix DE, ifeu)
+  const washes = grams / 600;
+  if (washes >= 0.5) equivs.push(`${washes.toFixed(1)} Waschgaenge (60&deg;C)`);
+  // Smartphone laden: ~7g CO2 pro Ladung (UBA)
+  const charges = Math.round(grams / 7);
+  if (charges >= 1) equivs.push(`${charges}&times; Smartphone laden`);
+  // Netflix streamen: ~36g CO2 pro Stunde (IEA/Carbon Trust)
+  const streaming = grams / 36;
+  if (streaming >= 0.5) equivs.push(`${streaming.toFixed(1)}h Netflix streamen`);
+  // Tasse Kaffee: ~60g CO2 (PCF Studien)
+  const coffees = grams / 60;
+  if (coffees >= 0.5) equivs.push(`${coffees.toFixed(1)} Tassen Kaffee`);
+  return equivs;
+}
+
+function co2EquivHtml(savedGrams) {
+  if (!savedGrams || savedGrams <= 0) return '';
+  const equivs = co2Equivalents(savedGrams);
+  if (equivs.length === 0) return '';
+  // Pro Jahr (220 Arbeitstage, Hin+Rueck)
+  const yearKg = (savedGrams * 2 * 220 / 1000).toFixed(0);
+  return `<div style="background:#e8f5e9;border-radius:6px;padding:8px 10px;margin:6px 0;font-size:.8em">
+    <b style="color:#2e7d32">CO2-Ersparnis pro Fahrt entspricht:</b><br>
+    ${equivs.slice(0, 2).join(' &middot; ')}
+    <br><b style="color:#2e7d32">Pro Jahr (220 Tage, Hin+Rueck):</b> ~${yearKg} kg CO2
+  </div>`;
+}
+
+// ─── Route Request ─────────────────────────────────────────
+document.getElementById('btn-route').addEventListener('click', computeRoute);
+document.addEventListener('keydown', e => {
+  // Only trigger on Enter if no autocomplete is open
+  if (e.key === 'Enter' && !document.querySelector('.ac-list.show')) computeRoute();
+});
+
+async function computeRoute() {
+  const btn = document.getElementById('btn-route');
+  const resultsDiv = document.getElementById('results');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Berechne...';
+  resultsDiv.innerHTML = '';
+  routeLayers.clearLayers();
+  markerLayers.clearLayers();
+
+  const body = {
+    start_address: document.getElementById('start-addr').value,
+    end_address: document.getElementById('end-addr').value,
+    arrival_time: document.getElementById('arrival-time').value,
+    weight_co2: +wCo2.value / 100,
+    weight_time: +wTime.value / 100,
+    weight_cost: +wCost.value / 100,
+    max_bike_km: +maxBike.value,
+    max_walk_m: +maxWalk.value,
+    algorithm: document.getElementById('algorithm').value,
+  };
+  // Include coordinates if resolved via autocomplete/GPS
+  if (startCoords.lat != null) {
+    body.start_lat = startCoords.lat;
+    body.start_lon = startCoords.lon;
+  }
+  if (endCoords.lat != null) {
+    body.end_lat = endCoords.lat;
+    body.end_lon = endCoords.lon;
+  }
+
+  try {
+    const resp = await fetch('/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || JSON.stringify(err));
+    }
+
+    const data = await resp.json();
+    lastRouteData = data;
+    renderResults(data);
+    renderMap(data);
+  } catch (e) {
+    resultsDiv.innerHTML = `<div class="notice error">Fehler: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Route berechnen';
+  }
+}
+
+// ─── Render Results ────────────────────────────────────────
+function renderResults(d) {
+  const resultsDiv = document.getElementById('results');
+  let html = '';
+
+  // CO2 comparison chart
+  const car = d.car_only;
+  const maxCo2 = car.co2_g;
+  html += '<div class="co2-chart"><b style="font-size:.85em">CO2-Vergleich (g pro Fahrt)</b>';
+  html += co2Bar('Auto', car.co2_g, maxCo2, '#e53935');
+  if (d.park_and_ride) html += co2Bar('P+R', d.park_and_ride.co2_g, maxCo2, '#43a047');
+  if (d.auto_transit) html += co2Bar('Auto+&Ouml;V', d.auto_transit.co2_g, maxCo2, '#ff9800');
+  if (d.bike_and_ride) html += co2Bar('B+R', d.bike_and_ride.co2_g, maxCo2, '#1e88e5');
+  html += '</div>';
+
+  // CO2 equivalents for the best saving
+  const savings = [d.co2_saved_pr_g, d.co2_saved_at_g, d.co2_saved_br_g].filter(Boolean);
+  const bestSaving = savings.length ? Math.max(...savings) : 0;
+  if (bestSaving > 0) {
+    html += co2EquivHtml(bestSaving);
+  }
+
+  // Car only card
+  html += `<div class="result-card" onclick="showRoute('car')">
+    <div class="card-header">
+      <h3><span class="badge badge-car">Auto</span> Nur Auto</h3>
+      <span>${car.duration_min} Min</span>
+    </div>
+    <div class="card-body">
+      <div class="metric"><span>Distanz</span><span class="metric-val">${car.distance_km} km</span></div>
+      <div class="metric"><span>Dauer</span><span class="metric-val">${car.duration_min} Min</span></div>
+      <div class="metric"><span>CO2</span><span class="metric-val">${car.co2_g} g</span></div>
+      <div class="metric"><span>Kosten</span><span class="metric-val">${car.cost_eur} &euro;</span></div>
+      ${car.estimated ? '<div class="notice">Distanz geschaetzt (OSRM nicht erreichbar)</div>' : ''}
+    </div>
+  </div>`;
+
+  // P+R card
+  if (d.park_and_ride) {
+    const pr = d.park_and_ride;
+    html += renderOptionCard('pr', 'Park & Ride', 'badge-pr', pr, d.co2_saved_pr_g);
+  } else if (d.reason_pr) {
+    html += `<div class="notice">P+R: ${d.reason_pr}</div>`;
+  }
+
+  // Auto + ÖPNV card
+  if (d.auto_transit) {
+    const at = d.auto_transit;
+    html += renderOptionCard('at', 'Auto + &Ouml;PNV', 'badge-at', at, d.co2_saved_at_g);
+  } else if (d.reason_at) {
+    html += `<div class="notice">Auto+&Ouml;PNV: ${d.reason_at}</div>`;
+  }
+
+  // B+R card
+  if (d.bike_and_ride) {
+    const br = d.bike_and_ride;
+    html += renderOptionCard('br', 'Bike & Ride', 'badge-br', br, d.co2_saved_br_g);
+  } else if (d.reason_br) {
+    html += `<div class="notice">B+R: ${d.reason_br}</div>`;
+  }
+
+  resultsDiv.innerHTML = html;
+
+  // Bind algorithm toggles
+  document.querySelectorAll('.algo-toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const table = el.nextElementSibling;
+      table.style.display = table.style.display === 'none' ? '' : 'none';
+    });
+  });
+}
+
+function renderOptionCard(type, title, badgeClass, opt, co2Saved) {
+  const scoreColor = opt.score >= 60 ? '#43a047' : opt.score >= 40 ? '#ff9800' : '#e53935';
+  let segHtml = opt.segments.map(s => {
+    const icon = s.type === 'car' ? '\uD83D\uDE97' : s.type === 'bike' ? '\uD83D\uDEB2' : s.type === 'transit' ? '\uD83D\uDE86' : '\uD83D\uDEB6';
+    const dist = s.distance_km ? `${s.distance_km} km` : `${s.distance_m} m`;
+    // For transit segments, show route type labels from path
+    let transitDetail = '';
+    if (s.type === 'transit' && s.path && s.path.length > 1) {
+      const legs = [];
+      let currentLabel = '';
+      let currentName = '';
+      for (const step of s.path) {
+        const lbl = step.route_type_label || '';
+        const rn = step.route_name || '';
+        if (rn && rn !== 'walk' && (lbl !== currentLabel || rn !== currentName)) {
+          currentLabel = lbl;
+          currentName = rn;
+          const typeIcon = lbl === 'Tram' ? '\uD83D\uDE8A' : lbl === 'Bus' ? '\uD83D\uDE8C' :
+            (lbl === 'Zug' || lbl === 'Regionalzug' || lbl === 'S-Bahn') ? '\uD83D\uDE89' : '\uD83D\uDE86';
+          legs.push(`${typeIcon} ${lbl} ${rn}`);
+        }
+      }
+      if (legs.length > 0) {
+        transitDetail = `<div style="font-size:.8em;color:#555;margin:2px 0 4px 20px">${legs.join(' &rarr; ')}</div>`;
+      }
+    }
+    return `<div class="metric"><span>${icon} ${s.from} &rarr; ${s.to}</span><span class="metric-val">${s.duration_min} Min (${dist})</span></div>${transitDetail}`;
+  }).join('');
+
+  // Algorithm results table
+  let algoHtml = '';
+  if (opt.algorithm_results) {
+    const ar = opt.algorithm_results;
+    const selectedAlgo = document.getElementById('algorithm').value;
+    algoHtml = `<div class="algo-toggle">Algorithmenvergleich anzeigen</div>
+    <table class="algo-table" style="display:none">
+      <tr><th>Algorithmus</th><th>Laufzeit</th><th>Knoten</th><th>Kosten</th><th>Umstiege</th><th>Gefunden</th></tr>
+      ${['greedy','dijkstra','astar'].map(a => {
+        const r = ar[a];
+        const sel = a === selectedAlgo ? ' style="background:#e8f0fe;font-weight:600"' : '';
+        return `<tr${sel}><td>${a}${a === selectedAlgo ? ' \u2605' : ''}</td><td>${r.runtime_ms.toFixed(2)} ms</td><td>${r.nodes_expanded}</td>
+                <td>${r.found && r.cost != null ? r.cost.toFixed(1) : '-'}</td><td>${r.found ? r.num_transfers : '-'}</td>
+                <td>${r.found ? '\u2713' : '\u2717'}</td></tr>`;
+      }).join('')}
+    </table>`;
+  }
+
+  const stationInfo = opt.parking_station
+    ? `<div class="metric"><span>P+R Station</span><span class="metric-val">${opt.parking_station.name}</span></div>`
+    : opt.bike_station
+    ? `<div class="metric"><span>Abstellanlage</span><span class="metric-val">${opt.bike_station.name}</span></div>`
+    : opt.entry_stop
+    ? `<div class="metric"><span>Einstieg</span><span class="metric-val">${opt.entry_stop.name}</span></div>`
+    : '';
+
+  return `<div class="result-card" onclick="showRoute('${type}')">
+    <div class="card-header">
+      <h3><span class="badge ${badgeClass}">${type === 'pr' ? 'P+R' : type === 'at' ? 'A+&Ouml;V' : 'B+R'}</span> ${title}</h3>
+      <span>${opt.total_duration_min} Min</span>
+    </div>
+    <div class="card-body">
+      <div class="score-gauge">
+        <div class="score-circle" style="background:${scoreColor}">${opt.score}</div>
+        <div style="font-size:.75em;color:#666;margin-top:4px">Pendler-Score</div>
+      </div>
+      ${segHtml}
+      <div class="metric"><span>Gesamt-CO2</span><span class="metric-val">${opt.co2_g} g</span></div>
+      <div class="metric"><span>CO2 gespart</span><span class="metric-val" style="color:#43a047">${co2Saved} g</span></div>
+      <div class="metric"><span>Kosten</span><span class="metric-val">${opt.cost_eur} &euro;</span></div>
+      ${stationInfo}
+      ${algoHtml}
+    </div>
+  </div>`;
+}
+
+function co2Bar(label, value, maxVal, color) {
+  const pct = maxVal > 0 ? Math.round(value / maxVal * 100) : 0;
+  return `<div class="co2-bar-row">
+    <span class="co2-bar-label">${label}</span>
+    <div class="co2-bar-track"><div class="co2-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+    <span class="co2-bar-val">${value} g</span>
+  </div>`;
+}
+
+// ─── Render Map ────────────────────────────────────────────
+function renderMap(d) {
+  routeLayers.clearLayers();
+  markerLayers.clearLayers();
+  const bounds = [];
+
+  // Car route (red)
+  if (d.car_only.geometry) {
+    const coords = d.car_only.geometry.coordinates.map(c => [c[1], c[0]]);
+    L.polyline(coords, { color: '#e53935', weight: 4, opacity: 0.8 }).addTo(routeLayers);
+    bounds.push(...coords);
+  }
+
+  // P+R route (green)
+  if (d.park_and_ride) {
+    drawMultimodalRoute(d.park_and_ride, '#43a047', bounds);
+    if (d.park_and_ride.parking_station) {
+      const ps = d.park_and_ride.parking_station;
+      L.marker([ps.lat, ps.lon], {
+        icon: L.divIcon({ className: '', html: '<div style="background:#43a047;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">P+R</div>' })
+      }).bindPopup(`<b>${ps.name}</b>`).addTo(markerLayers);
+    }
+  }
+
+  // Auto+ÖPNV route (orange)
+  if (d.auto_transit) {
+    drawMultimodalRoute(d.auto_transit, '#ff9800', bounds);
+    if (d.auto_transit.entry_stop) {
+      const es = d.auto_transit.entry_stop;
+      L.marker([es.lat, es.lon], {
+        icon: L.divIcon({ className: '', html: '<div style="background:#ff9800;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">A+&Ouml;V</div>' })
+      }).bindPopup(`<b>${es.name}</b>`).addTo(markerLayers);
+    }
+  }
+
+  // B+R route (blue)
+  if (d.bike_and_ride) {
+    drawMultimodalRoute(d.bike_and_ride, '#1e88e5', bounds);
+    if (d.bike_and_ride.bike_station) {
+      const bs = d.bike_and_ride.bike_station;
+      L.marker([bs.lat, bs.lon], {
+        icon: L.divIcon({ className: '', html: '<div style="background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">B+R</div>' })
+      }).bindPopup(`<b>${bs.name}</b>`).addTo(markerLayers);
+    }
+  }
+
+  if (bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+function drawMultimodalRoute(option, baseColor, bounds) {
+  option.segments.forEach(seg => {
+    if (seg.geometry) {
+      const coords = seg.geometry.coordinates.map(c => [c[1], c[0]]);
+      const isDashed = seg.type === 'car' || seg.type === 'bike';
+      L.polyline(coords, {
+        color: baseColor, weight: 4,
+        dashArray: isDashed ? '8, 8' : null, opacity: 0.8,
+      }).addTo(routeLayers);
+      bounds.push(...coords);
+    }
+  });
+}
+
+// Helper: show specific route type
+window.showRoute = function(type) {
+  document.querySelectorAll('.result-card').forEach((c, i) => {
+    c.classList.toggle('active',
+      (type === 'car' && i === 0) ||
+      (type === 'pr' && i === 1) ||
+      (type === 'at' && i === 2) ||
+      (type === 'br' && i === 3)
+    );
+  });
+};
+
+// ─── Fetch stops for transit path rendering ────────────────
+let stopCoords = {};
+async function loadStopCoords() {
+  try {
+    const resp = await fetch('/stops');
+    const stops = await resp.json();
+    stops.forEach(s => { stopCoords[s.stop_id] = [s.lat, s.lon]; });
+  } catch (e) {
+    console.warn('Could not load stop coords:', e);
+  }
+}
+loadStopCoords();
+
+// Enhanced drawMultimodalRoute with transit stop rendering
+const _origDraw = drawMultimodalRoute;
+drawMultimodalRoute = function(option, baseColor, bounds) {
+  option.segments.forEach(seg => {
+    if (seg.type === 'transit' && seg.path && seg.path.length > 1) {
+      const coords = seg.path
+        .map(s => stopCoords[s.stop_id])
+        .filter(Boolean);
+      if (coords.length > 1) {
+        L.polyline(coords, { color: baseColor, weight: 5, opacity: 0.9 }).addTo(routeLayers);
+        bounds.push(...coords);
+        coords.forEach((c, i) => {
+          L.circleMarker(c, { radius: 4, color: baseColor, fillColor: '#fff',
+                              fillOpacity: 1, weight: 2 })
+            .bindPopup(seg.path[i].stop_name || seg.path[i].stop_id)
+            .addTo(markerLayers);
+        });
+      }
+    }
+
+    if (seg.geometry) {
+      const coords = seg.geometry.coordinates.map(c => [c[1], c[0]]);
+      const isDashed = seg.type === 'car' || seg.type === 'bike';
+      L.polyline(coords, {
+        color: baseColor, weight: 4,
+        dashArray: isDashed ? '8, 8' : null, opacity: 0.8,
+      }).addTo(routeLayers);
+      bounds.push(...coords);
+    }
+  });
+};
+</script>
+</body>
+</html>
