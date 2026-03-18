@@ -151,7 +151,7 @@ class TransitGraph:
                         departure=r["dep"], arrival=r["arr"],
                         duration=r["dur"], trip_id=r["trip"],
                         route_id=r["route"], route_name=r["rname"],
-                        route_type=r.get("rtype", 3) or 3,
+                        route_type=r["rtype"] if r.get("rtype") is not None else 3,
                     )
                     self.connections_from.setdefault(conn.from_id, []).append(conn)
 

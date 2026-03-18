@@ -54,8 +54,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 /* ─── Results ───────────────────────────────────────────── */
 #results { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
 .result-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
-               margin-top: 12px; overflow: hidden; }
-.result-card.active { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,.2); }
+               margin-top: 12px; overflow: hidden; display: none; }
+.result-card.active { display: block; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,.2); }
+
+/* ─── Route Toggle Buttons ─────────────────────────────── */
+.route-toggle { display: flex; gap: 4px; margin: 12px 0 0; flex-wrap: wrap; }
+.route-toggle button { flex: 1; min-width: 60px; padding: 6px 4px; border: 2px solid #ddd;
+                        border-radius: 6px; background: #fff; font-size: .75em;
+                        font-weight: 600; cursor: pointer; transition: all .2s; }
+.route-toggle button:hover { background: #f5f5f5; }
+.route-toggle button.active { color: #fff; border-color: transparent; }
+.route-toggle button[data-route="car"].active { background: #e53935; }
+.route-toggle button[data-route="pr"].active { background: #43a047; }
+.route-toggle button[data-route="at"].active { background: #ff9800; }
+.route-toggle button[data-route="br"].active { background: #1e88e5; }
 .card-header { padding: 12px 16px; display: flex; justify-content: space-between;
                align-items: center; cursor: pointer; }
 .card-header h3 { font-size: .95em; }
@@ -227,10 +239,16 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 18,
 }).addTo(map);
 
-const routeLayers = L.layerGroup().addTo(map);
-const markerLayers = L.layerGroup().addTo(map);
 const stationLayers = L.layerGroup().addTo(map);
 
+// Per-route layer groups
+const routeLayerMap = {
+  car: L.layerGroup(),
+  pr:  L.layerGroup(),
+  at:  L.layerGroup(),
+  br:  L.layerGroup(),
+};
+let activeRoute = null;
 let lastRouteData = null;
 
 // ─── Coordinate Storage ────────────────────────────────────
@@ -525,7 +543,7 @@ function co2EquivHtml(savedGrams) {
   // Pro Jahr (220 Arbeitstage, Hin+Rueck)
   const yearKg = (savedGrams * 2 * 220 / 1000).toFixed(0);
   return `<div style="background:#e8f5e9;border-radius:6px;padding:8px 10px;margin:6px 0;font-size:.8em">
-    <b style="color:#2e7d32">CO2-Ersparnis pro Fahrt entspricht:</b><br>
+    <b style="color:#2e7d32">CO2-Ersparnis pro Fahrt (vs. nur Auto):</b><br>
     ${equivs.slice(0, 2).join(' &middot; ')}
     <br><b style="color:#2e7d32">Pro Jahr (220 Tage, Hin+Rueck):</b> ~${yearKg} kg CO2
   </div>`;
@@ -544,8 +562,8 @@ async function computeRoute() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Berechne...';
   resultsDiv.innerHTML = '';
-  routeLayers.clearLayers();
-  markerLayers.clearLayers();
+  Object.values(routeLayerMap).forEach(lg => { lg.clearLayers(); map.removeLayer(lg); });
+  activeRoute = null;
 
   const body = {
     start_address: document.getElementById('start-addr').value,
@@ -614,8 +632,16 @@ function renderResults(d) {
     html += co2EquivHtml(bestSaving);
   }
 
+  // Route toggle buttons
+  html += '<div class="route-toggle">';
+  html += '<button data-route="car" onclick="showRoute(\'car\')">Auto</button>';
+  if (d.park_and_ride) html += '<button data-route="pr" onclick="showRoute(\'pr\')">P+R</button>';
+  if (d.auto_transit) html += '<button data-route="at" onclick="showRoute(\'at\')">A+&Ouml;V</button>';
+  if (d.bike_and_ride) html += '<button data-route="br" onclick="showRoute(\'br\')">B+R</button>';
+  html += '</div>';
+
   // Car only card
-  html += `<div class="result-card" onclick="showRoute('car')">
+  html += `<div class="result-card" data-route="car" onclick="showRoute('car')">
     <div class="card-header">
       <h3><span class="badge badge-car">Auto</span> Nur Auto</h3>
       <span>${car.duration_min} Min</span>
@@ -625,7 +651,7 @@ function renderResults(d) {
       <div class="metric"><span>Dauer</span><span class="metric-val">${car.duration_min} Min</span></div>
       <div class="metric"><span>CO2</span><span class="metric-val">${car.co2_g} g</span></div>
       <div class="metric"><span>Kosten</span><span class="metric-val">${car.cost_eur} &euro;</span></div>
-      ${car.estimated ? '<div class="notice">Distanz geschaetzt (OSRM nicht erreichbar)</div>' : ''}
+      ${car.estimated ? '<div class="notice">Geschaetzte Distanz, kein OSRM verfuegbar</div>' : ''}
     </div>
   </div>`;
 
@@ -634,7 +660,7 @@ function renderResults(d) {
     const pr = d.park_and_ride;
     html += renderOptionCard('pr', 'Park & Ride', 'badge-pr', pr, d.co2_saved_pr_g);
   } else if (d.reason_pr) {
-    html += `<div class="notice">P+R: ${d.reason_pr}</div>`;
+    html += `<div class="notice result-card" data-route="pr" style="display:none">P+R: ${d.reason_pr}</div>`;
   }
 
   // Auto + ÖPNV card
@@ -642,7 +668,7 @@ function renderResults(d) {
     const at = d.auto_transit;
     html += renderOptionCard('at', 'Auto + &Ouml;PNV', 'badge-at', at, d.co2_saved_at_g);
   } else if (d.reason_at) {
-    html += `<div class="notice">Auto+&Ouml;PNV: ${d.reason_at}</div>`;
+    html += `<div class="notice result-card" data-route="at" style="display:none">Auto+&Ouml;PNV: ${d.reason_at}</div>`;
   }
 
   // B+R card
@@ -650,7 +676,7 @@ function renderResults(d) {
     const br = d.bike_and_ride;
     html += renderOptionCard('br', 'Bike & Ride', 'badge-br', br, d.co2_saved_br_g);
   } else if (d.reason_br) {
-    html += `<div class="notice">B+R: ${d.reason_br}</div>`;
+    html += `<div class="notice result-card" data-route="br" style="display:none">B+R: ${d.reason_br}</div>`;
   }
 
   resultsDiv.innerHTML = html;
@@ -719,7 +745,7 @@ function renderOptionCard(type, title, badgeClass, opt, co2Saved) {
     ? `<div class="metric"><span>Einstieg</span><span class="metric-val">${opt.entry_stop.name}</span></div>`
     : '';
 
-  return `<div class="result-card" onclick="showRoute('${type}')">
+  return `<div class="result-card" data-route="${type}" onclick="showRoute('${type}')">
     <div class="card-header">
       <h3><span class="badge ${badgeClass}">${type === 'pr' ? 'P+R' : type === 'at' ? 'A+&Ouml;V' : 'B+R'}</span> ${title}</h3>
       <span>${opt.total_duration_min} Min</span>
@@ -731,7 +757,7 @@ function renderOptionCard(type, title, badgeClass, opt, co2Saved) {
       </div>
       ${segHtml}
       <div class="metric"><span>Gesamt-CO2</span><span class="metric-val">${opt.co2_g} g</span></div>
-      <div class="metric"><span>CO2 gespart</span><span class="metric-val" style="color:#43a047">${co2Saved} g</span></div>
+      <div class="metric"><span>CO2 gespart vs. Auto</span><span class="metric-val" style="color:#43a047">${co2Saved} g</span></div>
       <div class="metric"><span>Kosten</span><span class="metric-val">${opt.cost_eur} &euro;</span></div>
       ${stationInfo}
       ${algoHtml}
@@ -749,79 +775,103 @@ function co2Bar(label, value, maxVal, color) {
 }
 
 // ─── Render Map ────────────────────────────────────────────
+let allRouteBounds = {};
+
 function renderMap(d) {
-  routeLayers.clearLayers();
-  markerLayers.clearLayers();
-  const bounds = [];
+  Object.values(routeLayerMap).forEach(lg => { lg.clearLayers(); map.removeLayer(lg); });
+  allRouteBounds = {};
 
   // Car route (red)
+  const carBounds = [];
   if (d.car_only.geometry) {
     const coords = d.car_only.geometry.coordinates.map(c => [c[1], c[0]]);
-    L.polyline(coords, { color: '#e53935', weight: 4, opacity: 0.8 }).addTo(routeLayers);
-    bounds.push(...coords);
+    L.polyline(coords, { color: '#e53935', weight: 5, opacity: 0.9 }).addTo(routeLayerMap.car);
+    carBounds.push(...coords);
   }
+  allRouteBounds.car = carBounds;
 
   // P+R route (green)
   if (d.park_and_ride) {
-    drawMultimodalRoute(d.park_and_ride, '#43a047', bounds);
+    const b = [];
+    drawMultimodalRoute(d.park_and_ride, '#43a047', routeLayerMap.pr, b);
     if (d.park_and_ride.parking_station) {
       const ps = d.park_and_ride.parking_station;
       L.marker([ps.lat, ps.lon], {
         icon: L.divIcon({ className: '', html: '<div style="background:#43a047;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">P+R</div>' })
-      }).bindPopup(`<b>${ps.name}</b>`).addTo(markerLayers);
+      }).bindPopup(`<b>${ps.name}</b>`).addTo(routeLayerMap.pr);
     }
+    allRouteBounds.pr = b;
   }
 
   // Auto+ÖPNV route (orange)
   if (d.auto_transit) {
-    drawMultimodalRoute(d.auto_transit, '#ff9800', bounds);
+    const b = [];
+    drawMultimodalRoute(d.auto_transit, '#ff9800', routeLayerMap.at, b);
     if (d.auto_transit.entry_stop) {
       const es = d.auto_transit.entry_stop;
       L.marker([es.lat, es.lon], {
         icon: L.divIcon({ className: '', html: '<div style="background:#ff9800;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">A+&Ouml;V</div>' })
-      }).bindPopup(`<b>${es.name}</b>`).addTo(markerLayers);
+      }).bindPopup(`<b>${es.name}</b>`).addTo(routeLayerMap.at);
     }
+    allRouteBounds.at = b;
   }
 
   // B+R route (blue)
   if (d.bike_and_ride) {
-    drawMultimodalRoute(d.bike_and_ride, '#1e88e5', bounds);
+    const b = [];
+    drawMultimodalRoute(d.bike_and_ride, '#1e88e5', routeLayerMap.br, b);
     if (d.bike_and_ride.bike_station) {
       const bs = d.bike_and_ride.bike_station;
       L.marker([bs.lat, bs.lon], {
         icon: L.divIcon({ className: '', html: '<div style="background:#1e88e5;color:#fff;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap">B+R</div>' })
-      }).bindPopup(`<b>${bs.name}</b>`).addTo(markerLayers);
+      }).bindPopup(`<b>${bs.name}</b>`).addTo(routeLayerMap.br);
     }
+    allRouteBounds.br = b;
   }
 
-  if (bounds.length > 0) {
-    map.fitBounds(bounds, { padding: [40, 40] });
-  }
+  // Show the first available alternative by default
+  const first = d.bike_and_ride ? 'br' : d.auto_transit ? 'at' : d.park_and_ride ? 'pr' : 'car';
+  showRoute(first);
 }
 
-function drawMultimodalRoute(option, baseColor, bounds) {
+function drawMultimodalRoute(option, baseColor, layerGroup, bounds) {
   option.segments.forEach(seg => {
     if (seg.geometry) {
       const coords = seg.geometry.coordinates.map(c => [c[1], c[0]]);
       const isDashed = seg.type === 'car' || seg.type === 'bike';
       L.polyline(coords, {
-        color: baseColor, weight: 4,
-        dashArray: isDashed ? '8, 8' : null, opacity: 0.8,
-      }).addTo(routeLayers);
+        color: baseColor, weight: 5,
+        dashArray: isDashed ? '8, 8' : null, opacity: 0.9,
+      }).addTo(layerGroup);
       bounds.push(...coords);
     }
   });
 }
 
-// Helper: show specific route type
+// ─── Toggle: show only one route at a time ──────────────────
 window.showRoute = function(type) {
-  document.querySelectorAll('.result-card').forEach((c, i) => {
-    c.classList.toggle('active',
-      (type === 'car' && i === 0) ||
-      (type === 'pr' && i === 1) ||
-      (type === 'at' && i === 2) ||
-      (type === 'br' && i === 3)
-    );
+  // Remove all route layers from map
+  Object.values(routeLayerMap).forEach(lg => map.removeLayer(lg));
+
+  // Add only the selected one
+  if (routeLayerMap[type]) {
+    routeLayerMap[type].addTo(map);
+  }
+  activeRoute = type;
+
+  // Fit bounds to the visible route
+  if (allRouteBounds[type] && allRouteBounds[type].length > 0) {
+    map.fitBounds(allRouteBounds[type], { padding: [40, 40] });
+  }
+
+  // Show only the active card, hide others
+  document.querySelectorAll('.result-card').forEach(c => {
+    const isActive = c.dataset.route === type;
+    c.classList.toggle('active', isActive);
+    c.style.display = isActive ? 'block' : 'none';
+  });
+  document.querySelectorAll('.route-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.route === type);
   });
 };
 
@@ -840,20 +890,20 @@ loadStopCoords();
 
 // Enhanced drawMultimodalRoute with transit stop rendering
 const _origDraw = drawMultimodalRoute;
-drawMultimodalRoute = function(option, baseColor, bounds) {
+drawMultimodalRoute = function(option, baseColor, layerGroup, bounds) {
   option.segments.forEach(seg => {
     if (seg.type === 'transit' && seg.path && seg.path.length > 1) {
       const coords = seg.path
         .map(s => stopCoords[s.stop_id])
         .filter(Boolean);
       if (coords.length > 1) {
-        L.polyline(coords, { color: baseColor, weight: 5, opacity: 0.9 }).addTo(routeLayers);
+        L.polyline(coords, { color: baseColor, weight: 5, opacity: 0.9 }).addTo(layerGroup);
         bounds.push(...coords);
         coords.forEach((c, i) => {
           L.circleMarker(c, { radius: 4, color: baseColor, fillColor: '#fff',
                               fillOpacity: 1, weight: 2 })
             .bindPopup(seg.path[i].stop_name || seg.path[i].stop_id)
-            .addTo(markerLayers);
+            .addTo(layerGroup);
         });
       }
     }
@@ -862,9 +912,9 @@ drawMultimodalRoute = function(option, baseColor, bounds) {
       const coords = seg.geometry.coordinates.map(c => [c[1], c[0]]);
       const isDashed = seg.type === 'car' || seg.type === 'bike';
       L.polyline(coords, {
-        color: baseColor, weight: 4,
-        dashArray: isDashed ? '8, 8' : null, opacity: 0.8,
-      }).addTo(routeLayers);
+        color: baseColor, weight: 5,
+        dashArray: isDashed ? '8, 8' : null, opacity: 0.9,
+      }).addTo(layerGroup);
       bounds.push(...coords);
     }
   });

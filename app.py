@@ -680,6 +680,7 @@ async def _compute_br_route(start_lat, start_lon, end_lat, end_lon,
     return None
 
 
+
 def _find_stop_near(lat: float, lon: float, max_m: float) -> Optional[dict]:
     """Find nearest stop within max_m meters. Uses Neo4j data via NEAR_STOP or direct search."""
     if not transit_graph:
